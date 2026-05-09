@@ -182,6 +182,13 @@ def resolve_bilibili_video(url: str, max_height: int = 720) -> dict:
     else:
         param = "bvid=" + vid
 
+    # ?p=N picks the Nth part of a multi-part video (1-indexed). Default to 1.
+    qs = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+    try:
+        page_idx = max(1, int(qs.get("p", ["1"])[0]))
+    except ValueError:
+        page_idx = 1
+
     info_req = urllib.request.Request(
         "https://api.bilibili.com/x/web-interface/view?" + param,
         headers={"User-Agent": UA, "Referer": "https://www.bilibili.com/",
@@ -191,8 +198,22 @@ def resolve_bilibili_video(url: str, max_height: int = 720) -> dict:
     if info.get("code") != 0:
         raise RuntimeError("bilibili view failed: " + str(info.get("message")))
     bvid  = info["data"]["bvid"]
-    cid   = info["data"]["cid"]
     title = info["data"].get("title") or ""
+
+    # Pick the requested part. pages[] always exists (single-part videos have
+    # one entry whose cid matches data.cid).
+    pages = info["data"].get("pages") or []
+    if pages and page_idx <= len(pages):
+        page = pages[page_idx - 1]
+        cid  = page["cid"]
+        part = page.get("part") or ""
+        if len(pages) > 1 and part:
+            title = title + " — P" + str(page_idx) + " " + part
+    else:
+        cid = info["data"]["cid"]
+        if pages and page_idx > len(pages):
+            raise RuntimeError("bilibili: requested p=" + str(page_idx) +
+                               " but video only has " + str(len(pages)) + " parts")
 
     # qn=120 → 4K when available; fnval=16 → DASH; fourk=1 → unlock 4K.
     play_req = urllib.request.Request(
@@ -402,6 +423,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self._handle_proxy()
         if self.path.startswith("/api/transcode"):
             return self._handle_transcode()
+        if self.path.startswith("/api/playlist"):
+            return self._handle_playlist()
         return super().do_GET()
 
     def do_POST(self):
@@ -425,6 +448,43 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         except Exception as e:
             return self._json(500, {"error": str(e)})
         return self._json(200, {"ok": True})
+
+    # ---- /api/playlist ---- expand a YouTube playlist URL into [{id,title,url}].
+    # Uses --flat-playlist so we don't pay the per-video signature decryption cost
+    # up front; each video is resolved on demand when the queue advances.
+    def _handle_playlist(self):
+        q = urllib.parse.urlparse(self.path).query
+        url = urllib.parse.parse_qs(q).get("url", [""])[0]
+        if not url:
+            return self._json(400, {"error": "missing url"})
+        cmd = [YTDLP, "-J", "--flat-playlist", "--no-warnings", url]
+        try:
+            out = subprocess.check_output(
+                cmd, timeout=45, stderr=subprocess.STDOUT, creationflags=NO_WINDOW)
+            meta = json.loads(out.decode("utf-8", errors="replace"))
+        except subprocess.CalledProcessError as e:
+            return self._json(502, {
+                "error": "yt-dlp failed",
+                "stderr": e.output.decode("utf-8", errors="replace")[-800:],
+            })
+        except Exception as e:
+            return self._json(500, {"error": str(e)})
+
+        entries = meta.get("entries") or []
+        items = []
+        for e in entries:
+            if not e or not e.get("id"):
+                continue
+            items.append({
+                "id":    e["id"],
+                "title": e.get("title") or "",
+                "url":   "https://www.youtube.com/watch?v=" + e["id"],
+            })
+        return self._json(200, {
+            "title":   meta.get("title") or "",
+            "count":   len(items),
+            "entries": items,
+        })
 
     # ---- /api/resolve ----
     def _handle_resolve(self):
@@ -466,6 +526,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             bitrate = params.get("vb", ["2500k"])[0]
         except Exception:
             bitrate = "2500k"
+        pixel = params.get("pixel", ["0"])[0] == "1"
         if not url:
             return self._json(400, {"error": "missing url"})
 
@@ -474,7 +535,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         except Exception as e:
             return self._json(502, {"error": "resolve failed: " + str(e)})
 
-        vf_args = ["-vf", "scale=-2:" + str(max_h)] if max_h > 0 else []
+        # Pixel-art mode: nearest-neighbor sampling preserves hard edges.
+        if max_h > 0:
+            scale = "scale=-2:" + str(max_h) + (":flags=neighbor" if pixel else "")
+            vf_args = ["-vf", scale]
+        else:
+            vf_args = []
 
         # Per-input headers (Referer-protected sources like Bilibili CDN).
         # -user_agent and -headers are per-input http options; reapply before

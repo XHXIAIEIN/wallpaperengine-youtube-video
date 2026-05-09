@@ -20,8 +20,12 @@
     offsetX: 0,             // -100..100 (vw)
     offsetY: 0,             // -100..100 (vh)
     safeBottom: 0,          // 0..15 (vh) — taskbar inset
+    pixelArt: false,        // nearest-neighbor sampling for pixel-art sources
     showDiag: false,
     isLive: false,          // resolved at runtime from helper
+    queue: [],              // [{id,title,url}] when playing a YouTube playlist
+    queueIndex: 0,
+    queueTitle: '',         // playlist title for diag
   };
 
   let catchupTimer = null;
@@ -33,6 +37,7 @@
     v.style.setProperty('--scale', state.scale);
     v.style.setProperty('--ox', state.offsetX + 'vw');
     v.style.setProperty('--oy', state.offsetY + 'vh');
+    v.classList.toggle('pixelart', !!state.pixelArt);
     document.documentElement.style.setProperty('--safe-bottom', state.safeBottom + 'vh');
   }
 
@@ -66,8 +71,55 @@
 
   function teardown() {
     const v = document.getElementById('player');
-    try { v.pause(); v.removeAttribute('src'); v.load(); } catch (_) {}
+    try { v.pause(); v.removeAttribute('src'); v.load(); v.onended = null; } catch (_) {}
     if (catchupTimer) { clearInterval(catchupTimer); catchupTimer = null; }
+  }
+
+  // Build the playlist queue if the current URL contains a list= parameter
+  // and we don't already have one. No-op for plain video URLs.
+  async function buildQueueIfNeeded() {
+    if (state.queue.length > 0) return;
+    if (!/[?&]list=/.test(state.url)) return;
+    Diag.set('playlist', 'fetching list...', 'warn');
+    try {
+      const r = await fetch(HELPER + '/api/playlist?url=' + encodeURIComponent(state.url));
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+      if (!data.entries || !data.entries.length) {
+        Diag.set('playlist', 'empty', 'warn');
+        return;
+      }
+      state.queue = data.entries;
+      state.queueIndex = 0;
+      state.queueTitle = data.title || '';
+      Diag.set('playlist',
+        (state.queueTitle || '(playlist)') + ' — '
+        + (state.queueIndex + 1) + '/' + data.count, 'ok');
+    } catch (e) {
+      Diag.set('playlist', 'failed: ' + e.message, 'err');
+    }
+  }
+
+  function currentPlayUrl() {
+    if (state.queue.length > 0) return state.queue[state.queueIndex].url;
+    return state.url;
+  }
+
+  function advanceQueue() {
+    if (state.queue.length === 0) return false;
+    state.queueIndex++;
+    if (state.queueIndex >= state.queue.length) {
+      if (state.loop) {
+        state.queueIndex = 0;
+      } else {
+        Diag.set('playlist', 'queue ended', 'ok');
+        return false;
+      }
+    }
+    Diag.set('playlist',
+      (state.queueTitle || '(playlist)') + ' — '
+      + (state.queueIndex + 1) + '/' + state.queue.length, 'ok');
+    return true;
   }
 
   // For live streams: if currentTime falls more than LAG_THRESHOLD seconds
@@ -95,9 +147,15 @@
 
   async function render() {
     teardown();
+    await buildQueueIfNeeded();
+    const playUrl = currentPlayUrl();
+    const inQueue = state.queue.length > 0;
     const v = document.getElementById('player');
     v.muted = state.muted;
-    v.loop  = state.loop;
+    // In queue mode we manage advancement ourselves — HTML5 loop would prevent
+    // 'ended' from ever firing, so disable it.
+    v.loop  = inQueue ? false : state.loop;
+    v.onended = inQueue ? () => { if (advanceQueue()) render(); } : null;
     v.playbackRate = state.speed;
     v.volume = state.volume;
     applyVisualVars();
@@ -124,16 +182,16 @@
       return;
     }
 
-    const p = pickPlatform(state.url);
+    const p = pickPlatform(playUrl);
     Diag.set('platform', p ? p.label : 'unknown (sending to helper anyway)', p ? 'ok' : 'warn');
-    Diag.set('url', state.url, 'ok');
+    Diag.set('url', playUrl, 'ok');
 
     if (!await probeHelper()) return;
 
     Diag.set('stream', 'resolving metadata...', 'warn');
     let info;
     try {
-      info = await fetchMeta(state.url);
+      info = await fetchMeta(playUrl);
     } catch (e) {
       Diag.set('stream', 'resolve failed: ' + e.message, 'err');
       return;
@@ -146,9 +204,10 @@
 
     const bitrateFor = { 0: '5500k', 1080: '4500k', 720: '2500k', 480: '1200k', 360: '700k' };
     const transcodeUrl = HELPER + '/api/transcode'
-        + '?url=' + encodeURIComponent(state.url)
+        + '?url=' + encodeURIComponent(playUrl)
         + '&h='   + state.height
         + '&vb='  + (bitrateFor[state.height] || '2500k')
+        + (state.pixelArt ? '&pixel=1' : '')
         + '&_t='  + Date.now();
 
     v.src = transcodeUrl;
@@ -164,7 +223,12 @@
 
     if (props.videourl && typeof props.videourl.value === 'string') {
       const v = props.videourl.value.trim();
-      if (v && v !== state.url) { state.url = v; needsRender = true; }
+      if (v && v !== state.url) {
+        state.url = v;
+        // New URL ⇒ discard previous playlist queue (will rebuild on render).
+        state.queue = []; state.queueIndex = 0; state.queueTitle = '';
+        needsRender = true;
+      }
     }
     if (props.localvideo && typeof props.localvideo.value === 'string') {
       const lv = props.localvideo.value.trim();
@@ -185,7 +249,11 @@
     }
     if (props.loop) {
       const v = !!props.loop.value;
-      if (v !== state.loop) { state.loop = v; if (vel) vel.loop = v; }
+      if (v !== state.loop) {
+        state.loop = v;
+        // In queue mode loop is queue-wraparound, not HTML5 loop — leave video.loop=false.
+        if (vel && state.queue.length === 0) vel.loop = v;
+      }
     }
     if (props.livecatchup) {
       state.liveCatchup = !!props.livecatchup.value;
@@ -224,6 +292,15 @@
     if (props.safebottom) {
       const x = +props.safebottom.value;
       if (!isNaN(x) && x !== state.safeBottom) { state.safeBottom = x; visualDirty = true; }
+    }
+    if (props.pixelart) {
+      const v = !!props.pixelart.value;
+      if (v !== state.pixelArt) {
+        state.pixelArt = v;
+        visualDirty = true;
+        // Toggle also affects the helper-side scale filter; refetch the stream.
+        needsRender = true;
+      }
     }
     if (visualDirty) applyVisualVars();
 
