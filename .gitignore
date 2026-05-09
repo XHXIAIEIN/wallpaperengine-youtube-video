@@ -1,0 +1,15 @@
+# Runtime logs (helper stdout + client diag sink)
+*.log
+
+# Move-to-junk-room staging area
+.trash/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Editor / OS clutter
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

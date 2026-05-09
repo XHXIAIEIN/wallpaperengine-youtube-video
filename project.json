@@ -1,0 +1,175 @@
+{
+	"title": "Stream Background",
+	"description": "把 YouTube / Bilibili / Vimeo / Twitch 视频/直播/播放列表 变成桌面壁纸。粘贴 URL 即播，纯背景不响应点击。",
+	"type": "web",
+	"file": "index.html",
+	"preview": "preview.png",
+	"visibility": "private",
+	"tags": ["Web", "Video", "Music"],
+	"general": {
+		"properties": {
+			"videourl": {
+				"order": 1,
+				"text": "视频地址",
+				"type": "textinput",
+				"value": "https://www.youtube.com/watch?v=jfKfPfyJRdk",
+				"group": "视频源"
+			},
+			"platform": {
+				"order": 2,
+				"text": "播放平台",
+				"type": "combo",
+				"value": "auto",
+				"options": [
+					{ "label": "自动识别", "value": "auto" },
+					{ "label": "YouTube", "value": "youtube" },
+					{ "label": "Bilibili", "value": "bilibili" },
+					{ "label": "Vimeo", "value": "vimeo" },
+					{ "label": "Twitch", "value": "twitch" }
+				],
+				"group": "视频源"
+			},
+			"height": {
+				"order": 3,
+				"text": "画质",
+				"type": "combo",
+				"value": "1080",
+				"options": [
+					{ "label": "自动", "value": "0" },
+					{ "label": "1080p", "value": "1080" },
+					{ "label": "720p", "value": "720" },
+					{ "label": "480p", "value": "480" },
+					{ "label": "360p", "value": "360" }
+				],
+				"group": "视频源"
+			},
+
+			"audiovolume": {
+				"order": 11,
+				"text": "音量",
+				"type": "slider",
+				"value": 50,
+				"min": 0,
+				"max": 100,
+				"step": 1,
+				"group": "播放"
+			},
+			"showplayopts": {
+				"order": 12,
+				"text": "显示播放选项",
+				"type": "bool",
+				"value": false,
+				"group": "播放"
+			},
+			"speed": {
+				"order": 13,
+				"text": "播放速度",
+				"type": "slider",
+				"value": 1.0,
+				"min": 0.25,
+				"max": 3.0,
+				"step": 0.05,
+				"group": "播放",
+				"condition": "showplayopts.value == true"
+			},
+			"muted": {
+				"order": 14,
+				"text": "静音播放",
+				"type": "bool",
+				"value": false,
+				"group": "播放",
+				"condition": "showplayopts.value == true"
+			},
+			"loop": {
+				"order": 15,
+				"text": "循环播放",
+				"type": "bool",
+				"value": true,
+				"group": "播放",
+				"condition": "showplayopts.value == true"
+			},
+			"livecatchup": {
+				"order": 16,
+				"text": "直播追新 (跳转到直播状态)",
+				"type": "bool",
+				"value": true,
+				"group": "播放",
+				"condition": "showplayopts.value == true"
+			},
+
+			"alignment": {
+				"order": 21,
+				"text": "对齐方式",
+				"type": "combo",
+				"value": "cover",
+				"options": [
+					{ "label": "覆盖", "value": "cover" },
+					{ "label": "填充", "value": "contain" },
+					{ "label": "拉伸", "value": "fill" },
+					{ "label": "居中", "value": "none" },
+					{ "label": "自由", "value": "scale-down" }
+				],
+				"group": "画面"
+			},
+			"showtransform": {
+				"order": 22,
+				"text": "显示缩放选项",
+				"type": "bool",
+				"value": false,
+				"group": "画面"
+			},
+			"scale": {
+				"order": 23,
+				"text": "画面缩放",
+				"type": "slider",
+				"value": 100,
+				"min": 50,
+				"max": 200,
+				"step": 1,
+				"group": "画面",
+				"condition": "showtransform.value == true"
+			},
+			"offsetx": {
+				"order": 24,
+				"text": "位置偏移 X",
+				"type": "slider",
+				"value": 0,
+				"min": -100,
+				"max": 100,
+				"step": 1,
+				"group": "画面",
+				"condition": "showtransform.value == true"
+			},
+			"offsety": {
+				"order": 25,
+				"text": "位置偏移 Y",
+				"type": "slider",
+				"value": 0,
+				"min": -100,
+				"max": 100,
+				"step": 1,
+				"group": "画面",
+				"condition": "showtransform.value == true"
+			},
+			"safebottom": {
+				"order": 26,
+				"text": "底部安全区",
+				"type": "slider",
+				"value": 0,
+				"min": 0,
+				"max": 15,
+				"step": 1,
+				"group": "画面",
+				"condition": "showtransform.value == true"
+			},
+
+			"showdiag": {
+				"order": 51,
+				"text": "显示诊断面板 (右下角)",
+				"type": "bool",
+				"value": false,
+				"group": "调试"
+			}
+		}
+	}
+}
